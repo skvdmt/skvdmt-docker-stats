@@ -1,0 +1,6 @@
+.gihub
+logs
+.dockerignore
+.gitignore
+Dockerfile
+*.md
