@@ -251,8 +251,7 @@ func (a *App) updated(upd *entities.DockerStats) (map[string]string, error) {
 	}
 	old := a.handlers[upd.Name].stats
 	emp := map[string]string{
-		"name":         upd.Name,
-		"container_id": upd.Id,
+		"name": upd.Name,
 	}
 	c := false
 	if *old == *upd {
