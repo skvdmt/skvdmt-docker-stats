@@ -340,7 +340,7 @@ func (a *App) format(s *container.StatsResponse) *entities.DockerStats {
 		Name:       strings.TrimPrefix(s.Name, "/"),
 		CPUPercent: fmt.Sprintf("%.2f%%", a.calcCPU(s)),
 		MemUsage:   a.formatBytes(memUsage, 1024, 4, "iB"),
-		MemLimit:   a.formatBytes(s.MemoryStats.Limit, 1024, 4, "iB"),
+		MemLimit:   a.formatBytes(s.MemoryStats.Limit, 1024, 3, "iB"),
 		MemPercent: fmt.Sprintf("%.2f%%", a.calcMemPercent(s.MemoryStats.Limit, memUsage)),
 		NetRx:      a.formatBytes(netRx, 1000, 3, "B"),
 		NetTx:      a.formatBytes(netTx, 1000, 3, "B"),
