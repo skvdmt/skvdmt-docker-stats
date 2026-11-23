@@ -346,7 +346,7 @@ func (a *App) format(s *container.StatsResponse) *entities.DockerStats {
 		NetTx:      a.formatBytes(netTx, 1000, 3, "B"),
 		BlockRead:  a.formatBytes(blockRead, 1000, 3, "B"),
 		BlockWrite: a.formatBytes(blockWrite, 1000, 3, "B"),
-		PIDs:       strconv.Itoa(int(s.PidsStats.Current)),
+		PIDs:       strconv.FormatUint(s.PidsStats.Current, 10),
 	}
 }
 
