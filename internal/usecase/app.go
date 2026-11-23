@@ -1,10 +1,12 @@
 package usecase
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,11 +43,26 @@ type App struct {
 	// Счетчик запущенных ресурсов.
 	wg sync.WaitGroup
 	// Обработкики статистики Docker. Ключ - имя контейнера.
-	handlers map[string]DockerStatHandler
+	handlers Handlers
 	// Мьютекс.
 	mu sync.Mutex
 	// Изменения.
 	changes chan json.RawMessage
+}
+
+// Handlers Обработчики.
+type Handlers map[string]DockerStatHandler
+
+// order порядковый номер обработчика.
+func (hs Handlers) order() int {
+	o := 0
+	for _, h := range hs {
+		if h.order > o {
+			o = h.order
+		}
+	}
+	o += 1
+	return o
 }
 
 // DockerHandler Обработчик статистики Docker.
@@ -53,6 +70,7 @@ type DockerStatHandler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	stats  *entities.DockerStats
+	order  int
 }
 
 // NewApp Конструктор.
@@ -62,7 +80,7 @@ func NewApp(ctx context.Context) (*App, error) {
 		ctx:      ctx,
 		exitRCNH: make(chan struct{}),
 		wg:       sync.WaitGroup{},
-		handlers: make(map[string]DockerStatHandler),
+		handlers: make(Handlers),
 		changes:  make(chan json.RawMessage),
 	}
 	var err error
@@ -112,9 +130,12 @@ func (a *App) Stop() error {
 func (a *App) DockerStats() ([]json.RawMessage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	raws := []json.RawMessage{}
-	for _, h := range a.handlers {
-		raw, err := json.Marshal(h.stats)
+	keys := slices.SortedFunc(maps.Keys(a.handlers), func(f, s string) int {
+		return cmp.Compare(a.handlers[f].order, a.handlers[s].order)
+	})
+	raws := make([]json.RawMessage, 0, len(keys))
+	for _, k := range keys {
+		raw, err := json.Marshal(a.handlers[k].stats)
 		if err != nil {
 			return nil, err
 		}
@@ -205,6 +226,7 @@ func (a *App) containerNamesHandle(names []string) {
 				stats: &entities.DockerStats{
 					Name: n,
 				},
+				order: a.handlers.order(),
 			}
 			a.wg.Add(1)
 			go func(ctx context.Context, cancel context.CancelFunc, n string) {
@@ -220,20 +242,24 @@ func (a *App) containerNamesHandle(names []string) {
 		a.mu.Unlock()
 	}
 	// Удаление старых обработчиков.
+	raws := []json.RawMessage{}
 	a.mu.Lock()
 	for n, h := range a.handlers {
 		if !slices.Contains(names, n) {
 			h.cancel()
 			delete(a.handlers, n)
 			raw, _ := json.Marshal(map[string]string{"remove": n})
-			select {
-			case a.changes <- raw:
-			case <-a.ctx.Done():
-				return
-			}
+			raws = append(raws, raw)
 		}
 	}
 	a.mu.Unlock()
+	for _, raw := range raws {
+		select {
+		case a.changes <- raw:
+		case <-a.ctx.Done():
+			return
+		}
+	}
 }
 
 // valid Проверка корректности статистики.
