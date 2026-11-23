@@ -283,6 +283,10 @@ func (a *App) updated(upd *entities.DockerStats) (map[string]string, error) {
 	if *old == *upd {
 		return nil, ERR_NO_CHANGES
 	}
+	if old.Id != upd.Id {
+		emp["container_id"] = upd.Id
+		c = true
+	}
 	if old.CPUPercent != upd.CPUPercent {
 		emp["cpu_percent"] = upd.CPUPercent
 		c = true
