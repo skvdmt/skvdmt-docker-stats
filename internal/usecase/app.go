@@ -43,34 +43,19 @@ type App struct {
 	// Счетчик запущенных ресурсов.
 	wg sync.WaitGroup
 	// Обработкики статистики Docker. Ключ - имя контейнера.
-	handlers Handlers
+	handlers map[string]DockerStatHandler
 	// Мьютекс.
 	mu sync.Mutex
 	// Изменения.
 	changes chan json.RawMessage
 }
 
-// Handlers Обработчики.
-type Handlers map[string]DockerStatHandler
-
-// order порядковый номер обработчика.
-func (hs Handlers) order() int {
-	o := 0
-	for _, h := range hs {
-		if h.order > o {
-			o = h.order
-		}
-	}
-	o += 1
-	return o
-}
-
 // DockerHandler Обработчик статистики Docker.
 type DockerStatHandler struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	stats  *entities.DockerStats
-	order  int
+	ctx     context.Context
+	cancel  context.CancelFunc
+	stats   *entities.DockerStats
+	created int64
 }
 
 // NewApp Конструктор.
@@ -80,7 +65,7 @@ func NewApp(ctx context.Context) (*App, error) {
 		ctx:      ctx,
 		exitRCNH: make(chan struct{}),
 		wg:       sync.WaitGroup{},
-		handlers: make(Handlers),
+		handlers: make(map[string]DockerStatHandler),
 		changes:  make(chan json.RawMessage),
 	}
 	var err error
@@ -131,7 +116,7 @@ func (a *App) DockerStats() ([]json.RawMessage, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	keys := slices.SortedFunc(maps.Keys(a.handlers), func(f, s string) int {
-		return cmp.Compare(a.handlers[f].order, a.handlers[s].order)
+		return cmp.Compare(a.handlers[s].created, a.handlers[f].created)
 	})
 	raws := make([]json.RawMessage, 0, len(keys))
 	for _, k := range keys {
@@ -202,31 +187,31 @@ func (a *App) refreshContainerNames() {
 		model.CommonErrors <- err
 		return
 	}
-	f := slices.DeleteFunc(ns, func(n string) bool {
-		return strings.HasPrefix(n, "buildx_") ||
-			strings.Contains(n, "test") ||
-			n == "redis-sse-server" ||
-			n == "migration" ||
-			n == "certbot"
+	f := slices.DeleteFunc(ns, func(i *entities.ContainerInfo) bool {
+		return strings.HasPrefix(i.Name, "buildx_") ||
+			strings.Contains(i.Name, "test") ||
+			i.Name == "redis-sse-server" ||
+			i.Name == "migration" ||
+			i.Name == "certbot"
 	})
 	a.containerNamesHandle(f)
 }
 
 // containerNamesHandle Обработка имен контейнеров.
-func (a *App) containerNamesHandle(names []string) {
+func (a *App) containerNamesHandle(containers []*entities.ContainerInfo) {
 	// Добавление новых контейнеров.
-	for _, n := range names {
+	for _, c := range containers {
 		a.mu.Lock()
-		_, o := a.handlers[n]
+		_, o := a.handlers[c.Name]
 		if !o {
 			ctx, cancel := context.WithCancel(a.ctx)
-			a.handlers[n] = DockerStatHandler{
+			a.handlers[c.Name] = DockerStatHandler{
 				ctx:    ctx,
 				cancel: cancel,
 				stats: &entities.DockerStats{
-					Name: n,
+					Name: c.Name,
 				},
-				order: a.handlers.order(),
+				created: c.Created,
 			}
 			a.wg.Add(1)
 			go func(ctx context.Context, cancel context.CancelFunc, n string) {
@@ -237,7 +222,7 @@ func (a *App) containerNamesHandle(names []string) {
 				}()
 				model.Log.Info.Info(fmt.Sprintf("container name handler %s creating", n))
 				a.repository.DockerStatHandler(ctx, n)
-			}(ctx, cancel, n)
+			}(ctx, cancel, c.Name)
 		}
 		a.mu.Unlock()
 	}
@@ -245,7 +230,9 @@ func (a *App) containerNamesHandle(names []string) {
 	raws := []json.RawMessage{}
 	a.mu.Lock()
 	for n, h := range a.handlers {
-		if !slices.Contains(names, n) {
+		if !slices.ContainsFunc(containers, func(c *entities.ContainerInfo) bool {
+			return c.Name == n
+		}) {
 			h.cancel()
 			delete(a.handlers, n)
 			raw, _ := json.Marshal(map[string]string{"remove": n})

@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"github.com/skvdmt/skvdmt-docker-stats/internal/entities"
 	"github.com/skvdmt/skvdmt-docker-stats/internal/model"
 )
 
@@ -38,7 +39,7 @@ func (d *Docker) DockerStats() <-chan *container.StatsResponse {
 }
 
 // DockerContainerNames Имена контейнеров Docker.
-func (d *Docker) DockerContainerNames() (names []string, err error) {
+func (d *Docker) DockerContainerNames() (info []*entities.ContainerInfo, err error) {
 	l, err := d.cli.ContainerList(d.ctx, client.ContainerListOptions{
 		All: false,
 	})
@@ -49,9 +50,12 @@ func (d *Docker) DockerContainerNames() (names []string, err error) {
 		if len(c.Names) == 0 {
 			continue
 		}
-		names = append(names, strings.TrimPrefix(c.Names[0], "/"))
+		info = append(info, &entities.ContainerInfo{
+			Name:    strings.TrimPrefix(c.Names[0], "/"),
+			Created: c.Created,
+		})
 	}
-	return names, nil
+	return info, nil
 }
 
 // Создание обработчика статистики контейнера Docker с именем name.
