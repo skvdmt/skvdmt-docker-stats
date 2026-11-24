@@ -4,7 +4,7 @@ import "net/http"
 
 // Deliver Интерфейс транспортного слоя.
 type Delivery interface {
-	// Запуск
+	// Запуск.
 	Start() error
 	// Готовность.
 	Ready() bool

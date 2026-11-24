@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,9 +17,12 @@ import (
 	"github.com/skvdmt/skvdmt-docker-stats/internal/model"
 )
 
+const (
+	SOURCES = 2
+)
+
 var (
 	TIMEOUT               = 3_000 * time.Millisecond
-	SOURCES               = 2
 	HEALTH_CHECK_INTERVAL = 100 * time.Millisecond
 	HEALTH_CHECK_TIMEOUT  = 3_000 * time.Millisecond
 	HTTP_SHUTDOWN_TIMEOUT = 12 * time.Second
@@ -46,7 +50,7 @@ type App struct {
 	// Сервер.
 	sever *http.Server
 	// Счетчик готовых ресурсов.
-	ready int
+	ready atomic.Int32
 }
 
 // NewApp Конструктор.
@@ -94,7 +98,7 @@ func (a *App) Start() []error {
 			model.CommonErrors <- err
 			return
 		}
-		a.ready += 1
+		a.ready.Add(1)
 		if err := a.healthCheckLock(); err != nil {
 			model.CommonErrors <- err
 			return
@@ -130,7 +134,7 @@ func (a *App) healthCheckLock() error {
 
 // Ready Готовность.
 func (a *App) Ready() bool {
-	return a.ready == SOURCES && a.delivery.Ready()
+	return a.ready.Load() == SOURCES && a.delivery.Ready()
 }
 
 // ErrorHandler Обработчик ошибок.
@@ -140,7 +144,7 @@ func (a *App) errorHandler() {
 		model.Log.Info.Info("error handler stopped")
 		a.wg.Done()
 	}()
-	a.ready += 1
+	a.ready.Add(1)
 	for {
 		select {
 		case err := <-model.MinorErrors:
@@ -162,7 +166,7 @@ func (a *App) errorHandler() {
 			if !a.stopping {
 				a.interrupt <- syscall.SIGTERM
 			}
-		case err := <-model.MinorErrors:
+		case err := <-model.CriticalErrors:
 			if err == nil {
 				return
 			}
